@@ -2,6 +2,10 @@
 
 Sieve polygons by fractional class coverage of categorical rasters, read directly from Cloud-Optimized GeoTIFFs over HTTP.
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/)
+
+**Live demo:** https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/ - move two sliders, watch 25,000 San Diego County parcels re-filter in milliseconds.
+
 ```python
 from cogsieve import CoverageScreen, run_screens
 
@@ -128,14 +132,16 @@ The numbers above (12 s for 25k parcels through two screens) reflect all three t
 
 ## Interactive demo
 
-A Streamlit app exposes the solar-siting funnel with live threshold tuning. The expensive raster reads were done once and cached; moving a slider re-filters 25,000 San Diego County parcels in milliseconds.
+Deployed at **https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/** - move the LCMAP and slope thresholds, watch the solar-siting funnel re-filter San Diego County parcels in milliseconds. The expensive raster reads were done once and cached; only the boolean `pass_frac >= threshold` recomputes per slider move.
+
+Run locally:
 
 ```bash
 pip install -e ".[streamlit]"
 streamlit run streamlit_app.py
 ```
 
-**Deploy on Streamlit Community Cloud** (free, ~3 minutes):
+**Re-deploy on Streamlit Community Cloud** (free, ~3 minutes):
 
 1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with the GitHub account that owns this repo.
 2. Click **New app**, pick the `cogsieve` repo, leave branch as `main`, set "Main file path" to `streamlit_app.py`.

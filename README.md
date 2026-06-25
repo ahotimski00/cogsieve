@@ -111,6 +111,21 @@ running screen slope_low on 768 polygons
 
 The LCMAP screen reads windowed pixels directly from the remote COG via HTTP range requests; no scene download. The slope screen reads from a local 7.3 MB COG derived once from 3DEP. The two-screen pipeline runs at ~2,000 parcels/sec because the second screen only sees parcels that passed the first.
 
+## Performance notes
+
+cogsieve gets its speed from three design choices, each of which removes a category of work that traditional GIS workflows pay for:
+
+**1. Exact fractional coverage instead of rasterize-then-intersect.**
+The textbook zonal-stats workflow rasterizes the raster into vector polygons, then intersects those vectors with the input polygons, then sums geodesic area per fragment. That introduces edge artifacts (pixels half-inside a polygon get either fully counted or fully discarded depending on the snapping rule) and produces O(input_polygons x intersecting_pixels) intermediate vector features. `exactextract` computes each pixel's fractional intersection with each polygon analytically in C++, with no vectorization step. Daniel Baston's published benchmarks for the underlying algorithm show it processes well over an order of magnitude faster than the vector-intersect approach for equivalent fidelity, on the same hardware.
+
+**2. Cloud-Optimized GeoTIFF (COG) windowed reads instead of full-scene downloads.**
+A COG is laid out in internal tiles plus an overview pyramid, and HTTP servers that support range requests can serve individual tiles without serving the whole file. `rasterio` (via GDAL's `/vsicurl/` driver) issues range requests for just the tiles that intersect each polygon's bounding box. For the solar demo, that means screening 25,000 parcels against the CONUS-wide LCMAP raster (which is multiple GB) without downloading the scene: the wire reads were in the tens of megabytes, not gigabytes.
+
+**3. Funnel pipeline with content-addressed caching.**
+The pipeline drops failing polygons between stages, so each successive screen only sees the survivors. In the solar demo, the slope screen runs on 768 polygons rather than 25,000 because LCMAP already filtered to 768 buildable parcels. The cache writes each stage's output to a GeoParquet keyed by `(polygon hash, screen name, classes, threshold)`, so re-running with the same inputs is near-instant. None of this requires user-side optimization; the funnel falls out of the `run_screens` API.
+
+The numbers above (12 s for 25k parcels through two screens) reflect all three together. A direct apples-to-apples comparison with ArcPy's `ZonalStatisticsAsTable` would require running both on the same hardware against the same data, which this repo doesn't currently do. If you want to verify the speed claim independently, the simplest control is `rasterstats.zonal_stats` (the standard pure-Python alternative): expect cogsieve to be roughly an order of magnitude faster on the same inputs, primarily from #2 and from `exactextract` being C++ rather than Python.
+
 ## Status
 
 Two demos wired end to end on real public data:

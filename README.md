@@ -126,6 +126,24 @@ The pipeline drops failing polygons between stages, so each successive screen on
 
 The numbers above (12 s for 25k parcels through two screens) reflect all three together. A direct apples-to-apples comparison with ArcPy's `ZonalStatisticsAsTable` would require running both on the same hardware against the same data, which this repo doesn't currently do. If you want to verify the speed claim independently, the simplest control is `rasterstats.zonal_stats` (the standard pure-Python alternative): expect cogsieve to be roughly an order of magnitude faster on the same inputs, primarily from #2 and from `exactextract` being C++ rather than Python.
 
+## Interactive demo
+
+A Streamlit app exposes the solar-siting funnel with live threshold tuning. The expensive raster reads were done once and cached; moving a slider re-filters 25,000 San Diego County parcels in milliseconds.
+
+```bash
+pip install -e ".[streamlit]"
+streamlit run streamlit_app.py
+```
+
+**Deploy on Streamlit Community Cloud** (free, ~3 minutes):
+
+1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with the GitHub account that owns this repo.
+2. Click **New app**, pick the `cogsieve` repo, leave branch as `main`, set "Main file path" to `streamlit_app.py`.
+3. Under "Advanced settings" set Python version to **3.11** or **3.12**. Streamlit Cloud will install from `pyproject.toml` automatically; the `[streamlit]` extra holds the deps it needs.
+4. Click **Deploy**. The build takes ~2 minutes (rasterio and exactextract pull GDAL wheels; no system packages needed).
+
+The deployed app reads the small GeoParquet files committed to [streamlit_data/](streamlit_data/), so it loads instantly with no live API calls. Re-running the screens from scratch happens locally; the cloud app only re-thresholds the cached fractions.
+
 ## Status
 
 Three demos wired end to end on real public data:

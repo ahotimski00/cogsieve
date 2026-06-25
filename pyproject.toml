@@ -41,6 +41,10 @@ demos = [
     "matplotlib",
     "contextily",
 ]
+streamlit = [
+    "streamlit>=1.36",
+    "pydeck>=0.9",
+]
 
 [project.scripts]
 cogsieve = "cogsieve.cli:app"

@@ -19,6 +19,9 @@ demos/**/output/
 *.tif
 *.tiff
 *.parquet
+# But DO commit the small sample data the Streamlit demo ships with:
+!streamlit_data/
+!streamlit_data/*.parquet
 
 # OS
 .DS_Store

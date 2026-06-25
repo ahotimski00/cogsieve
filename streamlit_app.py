@@ -85,13 +85,15 @@ def render_geojson_map(
     line_color: list[int],
     tooltip_field: str | None = None,
     fallback_zoom: int = 9,
+    feature_label: str = "polygons",
 ) -> None:
     """Render a pydeck polygon layer from a precomputed GeoJSON dict.
     Wrapped in a spinner so the loading affordance is over the map, not
     in the top nav bar."""
     if not geojson or not geojson.get("features"):
         return
-    with st.spinner("Updating map..."):
+    n_features = len(geojson["features"])
+    with st.spinner(f"Drawing {n_features:,} {feature_label} on the map..."):
         layer = pdk.Layer(
             "GeoJsonLayer",
             data=geojson,
@@ -191,6 +193,7 @@ def solar_funnel(lcmap_thr: float, slope_thr: float) -> dict:
     }
 
 
+@st.fragment
 def render_solar_demo() -> None:
     if "solar_active_preset" not in st.session_state:
         st.session_state.solar_active_preset = "Default"
@@ -257,6 +260,7 @@ def render_solar_demo() -> None:
             line_color=[34, 197, 94, 255],
             tooltip_field="APN",
             fallback_zoom=10,
+            feature_label="parcels",
         )
 
 
@@ -297,6 +301,7 @@ def tree_funnel(canopy_thr: float, urban_thr: float) -> dict:
     }
 
 
+@st.fragment
 def render_tree_equity_demo() -> None:
     if "tree_active_preset" not in st.session_state:
         st.session_state.tree_active_preset = "Default"
@@ -366,6 +371,7 @@ def render_tree_equity_demo() -> None:
             line_color=[185, 28, 28, 255],
             tooltip_field="GEOID",
             fallback_zoom=9,
+            feature_label="block groups",
         )
     st.caption(
         "Note: IO LULC's categorical Trees class is conservative in urban matrices "
@@ -408,6 +414,7 @@ def wildfire_funnel(burn_thr: float) -> dict:
     }
 
 
+@st.fragment
 def render_wildfire_demo() -> None:
     if "wildfire_active_preset" not in st.session_state:
         st.session_state.wildfire_active_preset = "Default"
@@ -456,24 +463,8 @@ def render_wildfire_demo() -> None:
             line_color=[194, 65, 12, 255],
             tooltip_field="APN",
             fallback_zoom=9,
+            feature_label="parcels",
         )
-
-
-# ============================================================================
-# Background cache warmup
-# ============================================================================
-
-def _warm_caches() -> None:
-    """Pre-populate caches for the DEFAULT preset of each demo so the first
-    tab the user lands on responds instantly. Other presets warm lazily on
-    first click. Adds ~1-2 seconds to the initial page load, in exchange
-    for instant default-preset response across all three tabs."""
-    if st.session_state.get("_caches_warmed"):
-        return
-    solar_funnel(0.60, 0.80)
-    tree_funnel(0.05, 0.70)
-    wildfire_funnel(0.01)
-    st.session_state._caches_warmed = True
 
 
 # ============================================================================
@@ -509,8 +500,6 @@ remote Cloud-Optimized GeoTIFFs.
         "the threshold comparison is recomputed, and the map re-fits to the "
         "new surviving set."
     )
-
-_warm_caches()
 
 tab_solar, tab_tree, tab_fire = st.tabs([
     ":sunny:  Solar siting",

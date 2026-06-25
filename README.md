@@ -113,4 +113,9 @@ The LCMAP screen reads windowed pixels directly from the remote COG via HTTP ran
 
 ## Status
 
-Core library and the solar-siting demo (USGS LCMAP + 3DEP-derived slope) are wired end to end on San Diego. The tree-equity and wildfire WUI demos are scaffolded with placeholder COG URLs; next commits will wire real STAC sources for NLCD Tree Canopy Cover and LANDFIRE FBFM40. PRs welcome.
+Two demos wired end to end on real public data:
+
+- **Solar siting** (San Diego County): USGS LCMAP buildable + 3DEP-derived slope. 25,000 parcels in 12 seconds. See [demos/solar_siting/](demos/solar_siting/).
+- **Tree equity** (LA County): IO LULC v2 low-canopy + urban-context. 6,591 block groups in 52 seconds. See [demos/tree_equity/](demos/tree_equity/).
+
+The wildfire WUI demo is scaffolded with placeholder COG URLs; the next commit will wire real STAC sources for LANDFIRE FBFM40 + MTBS. PRs welcome.

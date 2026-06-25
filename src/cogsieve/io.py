@@ -90,3 +90,66 @@ def pc_subscription_key() -> str | None:
 def describe_lcmap_classes() -> dict[int, str]:
     """Public copy of the LCMAP class legend, for demo configs to consume."""
     return dict(LCMAP_CLASS_NAMES)
+
+
+# ---------------------------------------------------------------------------
+# Impact Observatory 10m Annual LULC v2 (io-lulc-annual-v02)
+# ---------------------------------------------------------------------------
+# 10m global land cover, annual time series 2017-present. Higher resolution
+# than NLCD/LCMAP and a cleaner class set for urban demos. Tiles in MGRS
+# zones, so a single AOI may return one or several items per year.
+
+IO_LULC_COLLECTION = "io-lulc-annual-v02"
+IO_LULC_CLASS_NAMES: dict[int, str] = {
+    1: "water",
+    2: "trees",
+    4: "flooded_vegetation",
+    5: "crops",
+    7: "built_area",
+    8: "bare_ground",
+    9: "snow_ice",
+    10: "clouds",
+    11: "rangeland",
+}
+
+
+def io_lulc_asset_urls(
+    year: int,
+    bbox: tuple[float, float, float, float],
+) -> list[str]:
+    """Return signed COG URLs for IO LULC items covering bbox in `year`.
+
+    bbox is (minx, miny, maxx, maxy) in EPSG:4326.
+
+    IO LULC tiles by MGRS (Military Grid Reference System) zone, so a county-
+    scale AOI may straddle two or more tiles. Returns one URL per intersecting
+    tile, in arbitrary order. Callers that need a single raster should mosaic
+    them (or pick the dominant tile if a single representative is enough).
+    """
+    import planetary_computer
+    import pystac_client
+
+    catalog = pystac_client.Client.open(
+        "https://planetarycomputer.microsoft.com/api/stac/v1",
+        modifier=planetary_computer.sign_inplace,
+    )
+    search = catalog.search(collections=[IO_LULC_COLLECTION], bbox=bbox)
+    all_items = list(search.items())
+    items = [
+        i for i in all_items
+        if i.properties.get("start_datetime", "").startswith(str(year))
+    ]
+    if not items:
+        years_available = sorted({
+            i.properties.get("start_datetime", "")[:4] for i in all_items
+        })
+        raise RuntimeError(
+            f"no IO LULC items for {year} intersecting {bbox}. "
+            f"Years available: {years_available[0]}-{years_available[-1]}."
+        )
+    return [item.assets["data"].href for item in items]
+
+
+def describe_io_lulc_classes() -> dict[int, str]:
+    """Public copy of the IO LULC v2 class legend."""
+    return dict(IO_LULC_CLASS_NAMES)

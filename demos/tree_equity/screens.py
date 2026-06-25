@@ -1,48 +1,78 @@
 """Urban tree-equity screens.
 
-Goal: find parcels (or census blocks) where canopy is BELOW a threshold, so they
-can be prioritized for planting. This is the canonical inverted-coverage use case
-- the same primitive that screens IN farmland for conservation screens OUT
-canopy here.
+Find census block groups (small Census geographies that aggregate to tracts)
+where canopy is BELOW a threshold so they can be prioritized for planting.
+
+This is the canonical inverted-coverage use case: same primitive that screens
+IN farmland for conservation screens OUT canopy here, via `invert=True`.
 
 Pipeline:
-  1. Low canopy: NLCD Tree Canopy Cover (TCC) is a fractional 0-100 raster,
-     reclassified to 5 bins. Keep blocks with < 20% canopy.
-  2. Mostly developed: NLCD 2021 -- only keep blocks that are predominantly
-     urban land cover, so we're not flagging vacant rural fields.
+  1. Low canopy: IO LULC 10m global LULC v2 (Planetary Computer). Trees class
+     coverage below threshold (invert=True).
+  2. Urban context: same IO LULC raster, Built Area class coverage above
+     threshold. Rules out rural blocks that have no canopy because they
+     have no people.
+
+Both screens hit the same COG, so the second screen costs almost nothing
+to add: the read pattern is identical, the windows are the same, only the
+class codes and threshold differ.
+
+IO LULC v2 classes (see cogsieve.io.IO_LULC_CLASS_NAMES):
+    1  = Water
+    2  = Trees           (low fraction is the equity flag)
+    4  = Flooded vegetation
+    5  = Crops
+    7  = Built Area      (urban context filter)
+    8  = Bare ground
+    9  = Snow / Ice
+    10 = Clouds
+    11 = Rangeland
 """
 
 from __future__ import annotations
 
-from cogsieve import CoverageScreen
-
-NLCD_TCC_BINNED_COG = "https://example.com/data/nlcd_tcc_2021_binned.tif"
-NLCD_LANDCOVER_COG = "https://example.com/data/nlcd_2021_conus.tif"
+from cogsieve import CoverageScreen, io_lulc_asset_urls
 
 
-TREE_EQUITY_SCREENS = [
-    # Canopy is binned: 1=0-10%, 2=10-20%, 3=20-40%, 4=40-60%, 5=60%+
-    # INVERT: keep blocks where the "high canopy" classes (3+4+5) are LOW.
-    CoverageScreen(
-        name="low_canopy",
-        raster=NLCD_TCC_BINNED_COG,
-        pass_classes={3: "20_to_40pct", 4: "40_to_60pct", 5: "over_60pct"},
-        track_classes={1: "0_to_10pct", 2: "10_to_20pct"},
-        min_coverage=0.20,
-        invert=True,
-    ),
+def build_tree_equity_screens(
+    year: int,
+    bbox: tuple[float, float, float, float],
+    canopy_threshold: float = 0.20,
+    urban_threshold: float = 0.60,
+) -> list[CoverageScreen]:
+    """Build the tree-equity screen stack for an AOI.
 
-    # Developed land cover - keep blocks that are mostly urban. This rules out
-    # rural vacant land that "passes" the canopy screen for the wrong reason.
-    CoverageScreen(
-        name="urban_context",
-        raster=NLCD_LANDCOVER_COG,
-        pass_classes={
-            21: "developed_open",
-            22: "developed_low",
-            23: "developed_medium",
-            24: "developed_high",
-        },
-        min_coverage=0.60,
-    ),
-]
+    bbox is (minx, miny, maxx, maxy) in EPSG:4326.
+    canopy_threshold: blocks with tree coverage BELOW this fraction are
+      flagged (default 20% - blocks under one-fifth canopy).
+    urban_threshold: blocks with built-area coverage AT OR ABOVE this fraction
+      are kept as "actually urban" (default 60%).
+    """
+    urls = io_lulc_asset_urls(year=year, bbox=bbox)
+    if len(urls) > 1:
+        raise NotImplementedError(
+            f"AOI spans {len(urls)} IO LULC tiles. "
+            "Demo currently assumes a single-tile AOI. Mosaic support is a TODO."
+        )
+    raster = urls[0]
+
+    return [
+        CoverageScreen(
+            name="low_canopy",
+            raster=raster,
+            pass_classes={2: "trees"},
+            track_classes={
+                1: "water", 5: "crops", 7: "built_area", 11: "rangeland",
+                4: "flooded_veg", 8: "bare_ground",
+            },
+            min_coverage=canopy_threshold,
+            invert=True,  # keep blocks BELOW the canopy threshold
+        ),
+        CoverageScreen(
+            name="urban_context",
+            raster=raster,
+            pass_classes={7: "built_area"},
+            track_classes={2: "trees", 11: "rangeland", 1: "water"},
+            min_coverage=urban_threshold,
+        ),
+    ]

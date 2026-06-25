@@ -20,6 +20,7 @@ Deploy on Streamlit Community Cloud:
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -28,6 +29,7 @@ import pydeck as pdk
 import streamlit as st
 
 DATA_DIR = Path("streamlit_data")
+PRESETS_DIR = DATA_DIR / "presets"
 
 st.set_page_config(
     page_title="cogsieve - interactive demos",
@@ -54,6 +56,36 @@ st.markdown(
 @st.cache_data
 def _load_parquet(path: Path) -> gpd.GeoDataFrame:
     return gpd.read_parquet(path)
+
+
+@st.cache_data
+def _load_preset_file(path: str) -> dict:
+    """Load a precomputed preset JSON from disk. Cached so the same preset
+    in the same session reads from RAM after the first load."""
+    with open(path) as f:
+        return json.load(f)
+
+
+def _try_load_preset(demo: str, thresholds: dict[str, float]) -> dict | None:
+    """If `thresholds` matches the values stored in any preset JSON for `demo`,
+    load and return the precomputed result. Otherwise return None to signal
+    "fall back to live compute."
+
+    Matches with abs_tol=1e-6 to handle slider floating-point quirks.
+    """
+    if not PRESETS_DIR.exists():
+        return None
+    for path in PRESETS_DIR.glob(f"{demo}_*.json"):
+        try:
+            payload = _load_preset_file(str(path))
+        except (OSError, json.JSONDecodeError):
+            continue
+        stored = payload.get("thresholds", {})
+        if set(stored.keys()) != set(thresholds.keys()):
+            continue
+        if all(math.isclose(stored[k], v, abs_tol=1e-6) for k, v in thresholds.items()):
+            return payload
+    return None
 
 
 # ============================================================================
@@ -230,10 +262,11 @@ def render_solar_demo() -> None:
                  "or 2 (2-5%).",
         )
 
-    result = solar_funnel(
-        st.session_state.solar_lcmap_thr,
-        st.session_state.solar_slope_thr,
-    )
+    thresholds = {
+        "lcmap_thr": st.session_state.solar_lcmap_thr,
+        "slope_thr": st.session_state.solar_slope_thr,
+    }
+    result = _try_load_preset("solar", thresholds) or solar_funnel(**thresholds)
 
     render_funnel_metrics([
         ("Input parcels", result["input"], ""),
@@ -338,10 +371,11 @@ def render_tree_equity_demo() -> None:
                  "Rules out rural blocks that have no canopy because they have no people.",
         )
 
-    result = tree_funnel(
-        st.session_state.tree_canopy_thr,
-        st.session_state.tree_urban_thr,
-    )
+    thresholds = {
+        "canopy_thr": st.session_state.tree_canopy_thr,
+        "urban_thr": st.session_state.tree_urban_thr,
+    }
+    result = _try_load_preset("tree", thresholds) or tree_funnel(**thresholds)
 
     render_funnel_metrics([
         ("Input block groups", result["input"], ""),
@@ -439,7 +473,8 @@ def render_wildfire_demo() -> None:
              "covers at least this fraction of the parcel.",
     )
 
-    result = wildfire_funnel(st.session_state.wildfire_burn_thr)
+    thresholds = {"burn_thr": st.session_state.wildfire_burn_thr}
+    result = _try_load_preset("wildfire", thresholds) or wildfire_funnel(**thresholds)
 
     render_funnel_metrics([
         ("Input parcels", result["input"], ""),

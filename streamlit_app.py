@@ -3,8 +3,10 @@
 Each tab shows one demo (solar siting, tree equity, wildfire WUI). The
 expensive work - windowed COG reads and exactextract zonal stats - was
 done once and the per-class coverage fractions are committed as small
-GeoParquet files in `streamlit_data/`. Slider moves only recompute the
-boolean `pass_frac >= threshold` comparison, which is essentially free.
+GeoParquet files in `streamlit_data/`. Slider moves and preset clicks
+only recompute the boolean `pass_frac >= threshold` comparison, and
+the full funnel-plus-map result is cached on top so repeat preset
+clicks are instant.
 
 That two-step pattern - compute coverage once, threshold many times -
 is the actual workflow advantage cogsieve offers over rerun-the-whole-
@@ -33,6 +35,17 @@ st.set_page_config(
     layout="wide",
 )
 
+# Hide the default Streamlit top-right "Running..." status widget so the
+# inline map spinner is the only loading affordance the user sees.
+st.markdown(
+    """
+    <style>
+    div[data-testid="stStatusWidget"] { display: none; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # ============================================================================
 # Cached loaders. One per file so switching tabs reuses what's already in RAM.
@@ -44,65 +57,71 @@ def _load_parquet(path: Path) -> gpd.GeoDataFrame:
 
 
 # ============================================================================
-# Shared helpers
+# Shared map helpers
 # ============================================================================
 
-def _compute_view(gdf: gpd.GeoDataFrame, fallback_zoom: int = 9) -> pdk.ViewState:
-    """Fit-bounds view: center on the surviving polygons' bbox, pick a zoom
-    that frames them. Falls back to fallback_zoom if computation breaks down.
-    """
-    if len(gdf) == 0:
+def _view_from_bounds(
+    bounds: tuple[float, float, float, float] | None,
+    fallback_zoom: int = 9,
+) -> pdk.ViewState:
+    """Fit-bounds view from a (minx, miny, maxx, maxy) bbox in EPSG:4326."""
+    if not bounds:
         return pdk.ViewState(latitude=34.0, longitude=-118.0, zoom=fallback_zoom)
-
-    minx, miny, maxx, maxy = gdf.total_bounds
+    minx, miny, maxx, maxy = bounds
     center_lat = (miny + maxy) / 2
     center_lon = (minx + maxx) / 2
     lon_span = max(maxx - minx, 1e-4)
     lat_span = max(maxy - miny, 1e-4)
-    # Approximate web-mercator zoom: 360 / span at zoom 0 in one tile width.
-    # Subtract a small constant for screen padding and aspect.
     zoom_lon = math.log2(360 / lon_span)
     zoom_lat = math.log2(180 / lat_span)
     zoom = max(0, min(15, min(zoom_lon, zoom_lat) - 0.5))
     return pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=zoom, pitch=0)
 
 
-def render_polygon_map(
-    gdf: gpd.GeoDataFrame,
+def render_geojson_map(
+    geojson: dict | None,
+    bounds: tuple[float, float, float, float] | None,
     fill_color: list[int],
     line_color: list[int],
     tooltip_field: str | None = None,
     fallback_zoom: int = 9,
 ) -> None:
-    """Render a pydeck polygon layer fitted to the data's bbox."""
-    if len(gdf) == 0:
+    """Render a pydeck polygon layer from a precomputed GeoJSON dict.
+    Wrapped in a spinner so the loading affordance is over the map, not
+    in the top nav bar."""
+    if not geojson or not geojson.get("features"):
         return
-    final = gdf.to_crs("EPSG:4326") if gdf.crs and gdf.crs.to_epsg() != 4326 else gdf
-    layer = pdk.Layer(
-        "GeoJsonLayer",
-        data=final.__geo_interface__,
-        filled=True,
-        get_fill_color=fill_color,
-        get_line_color=line_color,
-        line_width_min_pixels=1,
-        pickable=True,
-    )
-    view = _compute_view(final, fallback_zoom=fallback_zoom)
-    tooltip = {"text": f"{tooltip_field}: " + "{" + tooltip_field + "}"} if tooltip_field else None
-    st.pydeck_chart(
-        pdk.Deck(
-            map_style="light",
-            initial_view_state=view,
-            layers=[layer],
-            tooltip=tooltip,
+    with st.spinner("Updating map..."):
+        layer = pdk.Layer(
+            "GeoJsonLayer",
+            data=geojson,
+            filled=True,
+            get_fill_color=fill_color,
+            get_line_color=line_color,
+            line_width_min_pixels=1,
+            pickable=True,
         )
-    )
+        view = _view_from_bounds(bounds, fallback_zoom=fallback_zoom)
+        tooltip = (
+            {"text": f"{tooltip_field}: " + "{" + tooltip_field + "}"} if tooltip_field else None
+        )
+        st.pydeck_chart(
+            pdk.Deck(
+                map_style="light",
+                initial_view_state=view,
+                layers=[layer],
+                tooltip=tooltip,
+            )
+        )
 
+
+# ============================================================================
+# Shared UI helpers
+# ============================================================================
 
 def render_funnel_metrics(stages: list[tuple[str, int, str]]) -> None:
     """Render N metric cards in a single row.
-    Each stage is (label, count, delta_string).
-    """
+    Each stage is (label, count, delta_string)."""
     cols = st.columns(len(stages))
     for col, (label, count, delta) in zip(cols, stages, strict=True):
         col.metric(label, f"{count:,}", delta=delta or None, delta_color="off")
@@ -110,16 +129,27 @@ def render_funnel_metrics(stages: list[tuple[str, int, str]]) -> None:
 
 def render_preset_buttons(
     presets: dict[str, dict[str, float]],
+    active_state_key: str,
     container_key: str,
 ) -> None:
-    """Render a row of preset buttons. Each press sets the named session-state
-    keys to the corresponding values. The sliders below read from those keys.
-    """
+    """Render a row of preset buttons. The currently-active preset is rendered
+    with type=primary so the user sees which scenario is selected. Clicking
+    a button writes preset values into session_state AND updates the active
+    state, so the visual sticks across the rerun."""
+    active = st.session_state.get(active_state_key, "")
     cols = st.columns(len(presets))
     for col, (label, values) in zip(cols, presets.items(), strict=True):
-        if col.button(label, key=f"{container_key}_btn_{label}", use_container_width=True):
+        btn_type = "primary" if label == active else "secondary"
+        if col.button(
+            label,
+            key=f"{container_key}_btn_{label}",
+            type=btn_type,
+            use_container_width=True,
+        ):
             for key, val in values.items():
                 st.session_state[key] = val
+            st.session_state[active_state_key] = label
+            st.rerun()
 
 
 # ============================================================================
@@ -133,9 +163,41 @@ SOLAR_PRESETS: dict[str, dict[str, float]] = {
 }
 
 
-def render_solar_demo() -> None:
+@st.cache_data
+def solar_funnel(lcmap_thr: float, slope_thr: float) -> dict:
+    """Return cached funnel result + final GeoJSON for given thresholds.
+    Repeat calls with the same args hit the cache instantly."""
     lcmap = _load_parquet(DATA_DIR / "solar_lcmap_fractions.parquet")
     slope = _load_parquet(DATA_DIR / "solar_slope_fractions.parquet")
+    stage1 = lcmap[lcmap["lcmap_buildable_pass_frac"] >= lcmap_thr]
+    slope_subset = slope[slope.index.isin(stage1.index)]
+    stage2 = slope_subset[slope_subset["slope_low_pass_frac"] >= slope_thr]
+    geojson = None
+    bounds = None
+    if len(stage2) > 0:
+        final = (
+            stage2.to_crs("EPSG:4326")
+            if stage2.crs and stage2.crs.to_epsg() != 4326
+            else stage2
+        )
+        geojson = final.__geo_interface__
+        bounds = tuple(final.total_bounds)
+    return {
+        "input": len(lcmap),
+        "stage1": len(stage1),
+        "stage2": len(stage2),
+        "geojson": geojson,
+        "bounds": bounds,
+    }
+
+
+def render_solar_demo() -> None:
+    if "solar_active_preset" not in st.session_state:
+        st.session_state.solar_active_preset = "Default"
+    if "solar_lcmap_thr" not in st.session_state:
+        st.session_state.solar_lcmap_thr = 0.60
+    if "solar_slope_thr" not in st.session_state:
+        st.session_state.solar_slope_thr = 0.80
 
     st.subheader("San Diego County, 25,000 parcels")
     st.markdown(
@@ -145,12 +207,7 @@ def render_solar_demo() -> None:
     )
 
     st.markdown("**Preset scenarios** (or fine-tune with the sliders below)")
-    render_preset_buttons(SOLAR_PRESETS, container_key="solar")
-
-    if "solar_lcmap_thr" not in st.session_state:
-        st.session_state.solar_lcmap_thr = 0.60
-    if "solar_slope_thr" not in st.session_state:
-        st.session_state.solar_slope_thr = 0.80
+    render_preset_buttons(SOLAR_PRESETS, "solar_active_preset", container_key="solar")
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -170,32 +227,32 @@ def render_solar_demo() -> None:
                  "or 2 (2-5%).",
         )
 
-    lcmap_thr = st.session_state.solar_lcmap_thr
-    slope_thr = st.session_state.solar_slope_thr
-    stage1 = lcmap[lcmap["lcmap_buildable_pass_frac"] >= lcmap_thr]
-    slope_subset = slope[slope.index.isin(stage1.index)]
-    stage2 = slope_subset[slope_subset["slope_low_pass_frac"] >= slope_thr]
+    result = solar_funnel(
+        st.session_state.solar_lcmap_thr,
+        st.session_state.solar_slope_thr,
+    )
 
     render_funnel_metrics([
-        ("Input parcels", len(lcmap), ""),
+        ("Input parcels", result["input"], ""),
         (
             "Pass LCMAP buildable",
-            len(stage1),
-            f"{100 * len(stage1) / len(lcmap):.1f}% of input",
+            result["stage1"],
+            f"{100 * result['stage1'] / result['input']:.1f}% of input",
         ),
         (
             "Pass slope",
-            len(stage2),
-            f"{100 * len(stage2) / max(len(stage1), 1):.1f}% of LCMAP survivors",
+            result["stage2"],
+            f"{100 * result['stage2'] / max(result['stage1'], 1):.1f}% of LCMAP survivors",
         ),
     ])
 
     st.markdown("##### Suitable parcels (map auto-zooms to the surviving set)")
-    if len(stage2) == 0:
+    if result["stage2"] == 0:
         st.warning("No parcels pass both screens. Try lowering one or both thresholds.")
     else:
-        render_polygon_map(
-            stage2,
+        render_geojson_map(
+            geojson=result["geojson"],
+            bounds=result["bounds"],
             fill_color=[34, 197, 94, 160],
             line_color=[34, 197, 94, 255],
             tooltip_field="APN",
@@ -214,9 +271,39 @@ TREE_PRESETS: dict[str, dict[str, float]] = {
 }
 
 
-def render_tree_equity_demo() -> None:
+@st.cache_data
+def tree_funnel(canopy_thr: float, urban_thr: float) -> dict:
     low_canopy = _load_parquet(DATA_DIR / "tree_low_canopy_fractions.parquet")
     urban_ctx = _load_parquet(DATA_DIR / "tree_urban_context_fractions.parquet")
+    stage1 = low_canopy[low_canopy["low_canopy_pass_frac"] < canopy_thr]
+    urban_subset = urban_ctx[urban_ctx.index.isin(stage1.index)]
+    stage2 = urban_subset[urban_subset["urban_context_pass_frac"] >= urban_thr]
+    geojson = None
+    bounds = None
+    if len(stage2) > 0:
+        final = (
+            stage2.to_crs("EPSG:4326")
+            if stage2.crs and stage2.crs.to_epsg() != 4326
+            else stage2
+        )
+        geojson = final.__geo_interface__
+        bounds = tuple(final.total_bounds)
+    return {
+        "input": len(low_canopy),
+        "stage1": len(stage1),
+        "stage2": len(stage2),
+        "geojson": geojson,
+        "bounds": bounds,
+    }
+
+
+def render_tree_equity_demo() -> None:
+    if "tree_active_preset" not in st.session_state:
+        st.session_state.tree_active_preset = "Default"
+    if "tree_canopy_thr" not in st.session_state:
+        st.session_state.tree_canopy_thr = 0.05
+    if "tree_urban_thr" not in st.session_state:
+        st.session_state.tree_urban_thr = 0.70
 
     st.subheader("LA County, 6,591 census block groups")
     st.markdown(
@@ -226,12 +313,7 @@ def render_tree_equity_demo() -> None:
     )
 
     st.markdown("**Preset scenarios** (or fine-tune with the sliders below)")
-    render_preset_buttons(TREE_PRESETS, container_key="tree")
-
-    if "tree_canopy_thr" not in st.session_state:
-        st.session_state.tree_canopy_thr = 0.05
-    if "tree_urban_thr" not in st.session_state:
-        st.session_state.tree_urban_thr = 0.70
+    render_preset_buttons(TREE_PRESETS, "tree_active_preset", container_key="tree")
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -251,33 +333,35 @@ def render_tree_equity_demo() -> None:
                  "Rules out rural blocks that have no canopy because they have no people.",
         )
 
-    canopy_thr = st.session_state.tree_canopy_thr
-    urban_thr = st.session_state.tree_urban_thr
-    stage1 = low_canopy[low_canopy["low_canopy_pass_frac"] < canopy_thr]
-    urban_subset = urban_ctx[urban_ctx.index.isin(stage1.index)]
-    stage2 = urban_subset[urban_subset["urban_context_pass_frac"] >= urban_thr]
+    result = tree_funnel(
+        st.session_state.tree_canopy_thr,
+        st.session_state.tree_urban_thr,
+    )
 
     render_funnel_metrics([
-        ("Input block groups", len(low_canopy), ""),
+        ("Input block groups", result["input"], ""),
         (
             "Pass low-canopy",
-            len(stage1),
-            f"{100 * len(stage1) / len(low_canopy):.1f}% of input",
+            result["stage1"],
+            f"{100 * result['stage1'] / result['input']:.1f}% of input",
         ),
         (
             "Pass urban context",
-            len(stage2),
-            f"{100 * len(stage2) / max(len(stage1), 1):.1f}% of low-canopy survivors",
+            result["stage2"],
+            f"{100 * result['stage2'] / max(result['stage1'], 1):.1f}% of low-canopy survivors",
         ),
     ])
 
     st.markdown("##### Priority planting block groups (map auto-zooms to the surviving set)")
-    if len(stage2) == 0:
-        st.warning("No block groups pass both screens. Try raising the canopy threshold or "
-                   "lowering the urban-context threshold.")
+    if result["stage2"] == 0:
+        st.warning(
+            "No block groups pass both screens. Try raising the canopy threshold or "
+            "lowering the urban-context threshold."
+        )
     else:
-        render_polygon_map(
-            stage2,
+        render_geojson_map(
+            geojson=result["geojson"],
+            bounds=result["bounds"],
             fill_color=[239, 68, 68, 110],
             line_color=[185, 28, 28, 255],
             tooltip_field="GEOID",
@@ -302,8 +386,33 @@ WILDFIRE_PRESETS: dict[str, dict[str, float]] = {
 }
 
 
-def render_wildfire_demo() -> None:
+@st.cache_data
+def wildfire_funnel(burn_thr: float) -> dict:
     burn = _load_parquet(DATA_DIR / "wildfire_recent_burn_fractions.parquet")
+    survivors = burn[burn["recent_burn_pass_frac"] >= burn_thr]
+    geojson = None
+    bounds = None
+    if len(survivors) > 0:
+        final = (
+            survivors.to_crs("EPSG:4326")
+            if survivors.crs and survivors.crs.to_epsg() != 4326
+            else survivors
+        )
+        geojson = final.__geo_interface__
+        bounds = tuple(final.total_bounds)
+    return {
+        "input": len(burn),
+        "stage1": len(survivors),
+        "geojson": geojson,
+        "bounds": bounds,
+    }
+
+
+def render_wildfire_demo() -> None:
+    if "wildfire_active_preset" not in st.session_state:
+        st.session_state.wildfire_active_preset = "Default"
+    if "wildfire_burn_thr" not in st.session_state:
+        st.session_state.wildfire_burn_thr = 0.01
 
     st.subheader("San Diego County, 25,000 parcels, MTBS 2007 burn-severity")
     st.markdown(
@@ -313,10 +422,7 @@ def render_wildfire_demo() -> None:
     )
 
     st.markdown("**Preset scenarios** (or fine-tune with the slider below)")
-    render_preset_buttons(WILDFIRE_PRESETS, container_key="wildfire")
-
-    if "wildfire_burn_thr" not in st.session_state:
-        st.session_state.wildfire_burn_thr = 0.01
+    render_preset_buttons(WILDFIRE_PRESETS, "wildfire_active_preset", container_key="wildfire")
 
     st.slider(
         "Burn-severity threshold (moderate + high pixel fraction)",
@@ -326,31 +432,48 @@ def render_wildfire_demo() -> None:
              "covers at least this fraction of the parcel.",
     )
 
-    burn_thr = st.session_state.wildfire_burn_thr
-    survivors = burn[burn["recent_burn_pass_frac"] >= burn_thr]
+    result = wildfire_funnel(st.session_state.wildfire_burn_thr)
 
     render_funnel_metrics([
-        ("Input parcels", len(burn), ""),
+        ("Input parcels", result["input"], ""),
         (
             "Flagged (in burn footprint)",
-            len(survivors),
-            f"{100 * len(survivors) / len(burn):.2f}% of input",
+            result["stage1"],
+            f"{100 * result['stage1'] / result['input']:.2f}% of input",
         ),
     ])
 
     st.markdown("##### Parcels in the 2007 burn footprint (map auto-zooms to the surviving set)")
-    if len(survivors) == 0:
+    if result["stage1"] == 0:
         st.warning(
             "No parcels meet the threshold. Lower it to surface the burn perimeter."
         )
     else:
-        render_polygon_map(
-            survivors,
+        render_geojson_map(
+            geojson=result["geojson"],
+            bounds=result["bounds"],
             fill_color=[249, 115, 22, 160],
             line_color=[194, 65, 12, 255],
             tooltip_field="APN",
             fallback_zoom=9,
         )
+
+
+# ============================================================================
+# Background cache warmup
+# ============================================================================
+
+def _warm_caches() -> None:
+    """Pre-populate caches for the DEFAULT preset of each demo so the first
+    tab the user lands on responds instantly. Other presets warm lazily on
+    first click. Adds ~1-2 seconds to the initial page load, in exchange
+    for instant default-preset response across all three tabs."""
+    if st.session_state.get("_caches_warmed"):
+        return
+    solar_funnel(0.60, 0.80)
+    tree_funnel(0.05, 0.70)
+    wildfire_funnel(0.01)
+    st.session_state._caches_warmed = True
 
 
 # ============================================================================
@@ -386,6 +509,8 @@ remote Cloud-Optimized GeoTIFFs.
         "the threshold comparison is recomputed, and the map re-fits to the "
         "new surviving set."
     )
+
+_warm_caches()
 
 tab_solar, tab_tree, tab_fire = st.tabs([
     ":sunny:  Solar siting",

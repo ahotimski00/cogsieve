@@ -20,7 +20,6 @@ Class legend:
 from __future__ import annotations
 
 import os
-from typing import Any
 
 LCMAP_COLLECTION = "usgs-lcmap-conus-v13"
 LCMAP_ASSET_KEY = "lcpri"  # primary land cover band
@@ -51,8 +50,8 @@ def lcmap_asset_url(
     per year. We pick the most recent item that intersects the bbox and the
     target year.
     """
-    import pystac_client
     import planetary_computer
+    import pystac_client
 
     catalog = pystac_client.Client.open(
         "https://planetarycomputer.microsoft.com/api/stac/v1",
@@ -65,7 +64,7 @@ def lcmap_asset_url(
     all_items = list(search.items())
     items = [
         i for i in all_items
-        if (sd := i.properties.get("start_datetime", "")).startswith(str(year))
+        if i.properties.get("start_datetime", "").startswith(str(year))
     ]
     if not items:
         years_available = sorted({

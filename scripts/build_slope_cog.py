@@ -19,12 +19,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pystac_client
 import planetary_computer as pc
+import pystac_client
 import rasterio
 import typer
 from rasterio.crs import CRS
-from rasterio.io import MemoryFile
 from rasterio.merge import merge
 from rasterio.warp import Resampling, calculate_default_transform, reproject
 from rich.console import Console

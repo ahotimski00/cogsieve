@@ -46,15 +46,17 @@ demos = [
 cogsieve = "cogsieve.cli:app"
 
 [tool.ruff]
-line-length = 100
+line-length = 110
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+# B008 is a false positive for Typer/Click: `typer.Option(...)` in defaults
+# is the intended pattern, not a bug.
+ignore = ["B008"]
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

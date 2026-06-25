@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Data caches (large, downloaded on demand)
+.cache/
+data/
+output/
+demos/**/data/
+demos/**/output/
+*.tif
+*.tiff
+*.parquet
+
+# OS
+.DS_Store

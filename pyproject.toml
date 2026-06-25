@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cogsieve"
+version = "0.1.0"
+description = "Filter polygons by fractional coverage of categorical raster classes, using cloud-optimized I/O."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Alex Hotimski" }]
+keywords = ["geospatial", "raster", "zonal-statistics", "cog", "stac"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+dependencies = [
+    "geopandas>=1.0",
+    "rasterio>=1.4",
+    "shapely>=2.0",
+    "exactextract>=0.2",
+    "pyarrow>=16.0",
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "numpy",
+]
+demos = [
+    "pystac-client",
+    "planetary-computer",
+    "matplotlib",
+    "contextily",
+]
+
+[project.scripts]
+cogsieve = "cogsieve.cli:app"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

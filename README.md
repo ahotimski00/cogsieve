@@ -4,7 +4,7 @@ Sieve polygons by fractional class coverage of categorical rasters, read directl
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/)
 
-**Live demo:** https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/ - move two sliders, watch 25,000 San Diego County parcels re-filter in milliseconds.
+**Live demo:** https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/ - three tabs (solar siting, tree equity, wildfire WUI), each with its own threshold sliders that re-filter the cached coverage fractions in milliseconds.
 
 ```python
 from cogsieve import CoverageScreen, run_screens
@@ -132,7 +132,13 @@ The numbers above (12 s for 25k parcels through two screens) reflect all three t
 
 ## Interactive demo
 
-Deployed at **https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/** - move the LCMAP and slope thresholds, watch the solar-siting funnel re-filter San Diego County parcels in milliseconds. The expensive raster reads were done once and cached; only the boolean `pass_frac >= threshold` recomputes per slider move.
+Deployed at **https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/** - three tabs, one per demo:
+
+- **Solar siting** (San Diego County): two thresholds (LCMAP buildable, slope) re-filter 25,000 parcels
+- **Tree equity** (LA County): two thresholds (canopy, urban context) re-filter 6,591 census block groups
+- **Wildfire WUI** (San Diego County, 2007 Witch Fire): one threshold (moderate-or-high MTBS severity) re-filters 25,000 parcels
+
+The expensive raster reads were done once and cached; only the boolean `pass_frac >= threshold` recomputes per slider move.
 
 Run locally:
 

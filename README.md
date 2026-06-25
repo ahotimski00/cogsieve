@@ -128,9 +128,10 @@ The numbers above (12 s for 25k parcels through two screens) reflect all three t
 
 ## Status
 
-Two demos wired end to end on real public data:
+Three demos wired end to end on real public data:
 
 - **Solar siting** (San Diego County): USGS LCMAP buildable + 3DEP-derived slope. 25,000 parcels in 12 seconds. See [demos/solar_siting/](demos/solar_siting/).
-- **Tree equity** (LA County): IO LULC v2 low-canopy + urban-context. 6,591 block groups in 52 seconds. See [demos/tree_equity/](demos/tree_equity/).
+- **Tree equity** (LA County): IO LULC v2 low-canopy + urban-context, with optional NLCD TCC v2 upgrade. 6,591 block groups in 52 seconds. See [demos/tree_equity/](demos/tree_equity/).
+- **Wildfire WUI** (San Diego County): MTBS annual burn-severity (cloud-native), with optional LANDFIRE FBFM40 fuels overlay. 25,000 parcels in 12 seconds. See [demos/wildfire_wui/](demos/wildfire_wui/).
 
-The wildfire WUI demo is scaffolded with placeholder COG URLs; the next commit will wire real STAC sources for LANDFIRE FBFM40 + MTBS. PRs welcome.
+PRs welcome.

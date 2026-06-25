@@ -153,3 +153,64 @@ def io_lulc_asset_urls(
 def describe_io_lulc_classes() -> dict[int, str]:
     """Public copy of the IO LULC v2 class legend."""
     return dict(IO_LULC_CLASS_NAMES)
+
+
+# ---------------------------------------------------------------------------
+# MTBS: Monitoring Trends in Burn Severity (CONUS, annual 1984-2018)
+# ---------------------------------------------------------------------------
+# Annual CONUS-wide burn-severity COGs from the MTBS inter-agency program.
+# One STAC item per year on Planetary Computer; collection covers 1984-2018.
+#
+# Severity class codes:
+#   0 = no data / outside fire perimeter
+#   1 = unburned to low
+#   2 = low severity
+#   3 = moderate severity
+#   4 = high severity
+#   5 = increased greenness (post-fire vegetation response)
+#   6 = mask / cloud / artifact
+
+MTBS_COLLECTION = "mtbs"
+MTBS_ASSET_KEY = "burn-severity"
+
+MTBS_CLASS_NAMES: dict[int, str] = {
+    1: "unburned_low",
+    2: "low",
+    3: "moderate",
+    4: "high",
+    5: "increased_greenness",
+    6: "mask",
+}
+
+
+def mtbs_asset_url(
+    year: int,
+    bbox: tuple[float, float, float, float],
+) -> str:
+    """Return a signed COG URL for the MTBS annual burn-severity raster.
+
+    bbox is (minx, miny, maxx, maxy) in EPSG:4326. The MTBS asset is a single
+    CONUS-wide annual mosaic; the bbox just narrows the STAC search.
+    """
+    import planetary_computer
+    import pystac_client
+
+    catalog = pystac_client.Client.open(
+        "https://planetarycomputer.microsoft.com/api/stac/v1",
+        modifier=planetary_computer.sign_inplace,
+    )
+    search = catalog.search(collections=[MTBS_COLLECTION], bbox=bbox)
+    all_items = list(search.items())
+    items = [i for i in all_items if i.id.endswith(f"_{year}_30m")]
+    if not items:
+        years_available = sorted({i.id.split("_")[-2] for i in all_items})
+        raise RuntimeError(
+            f"no MTBS items for {year}. "
+            f"Years available: {years_available[0]}-{years_available[-1]}."
+        )
+    return items[0].assets[MTBS_ASSET_KEY].href
+
+
+def describe_mtbs_classes() -> dict[int, str]:
+    """Public copy of the MTBS class legend."""
+    return dict(MTBS_CLASS_NAMES)

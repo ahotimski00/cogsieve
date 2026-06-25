@@ -35,6 +35,11 @@ def main(
     urban_threshold: float = typer.Option(
         0.60, help="Built-area fraction required to count as 'urban' context."
     ),
+    canopy_raster: Path = typer.Option(
+        None,
+        help="Optional NLCD TCC-derived canopy COG. When set, replaces the LULC "
+             "Trees-class screen with a finer-grained canopy-bin screen.",
+    ),
 ) -> None:
     gdf = gpd.read_parquet(blocks)
     console.print(f"loaded [bold]{len(gdf):,}[/bold] candidate blocks")
@@ -45,8 +50,10 @@ def main(
         bbox=bounds,
         canopy_threshold=canopy_threshold,
         urban_threshold=urban_threshold,
+        canopy_raster=canopy_raster,
     )
-    console.print(f"resolved [bold]{len(screens)}[/bold] screen(s) against IO LULC {year}")
+    canopy_src = "NLCD TCC" if canopy_raster else f"IO LULC {year}"
+    console.print(f"resolved [bold]{len(screens)}[/bold] screen(s); canopy from [bold]{canopy_src}[/bold]")
 
     t0 = time.perf_counter()
     results = run_screens(gdf, screens, cache_dir=cache)

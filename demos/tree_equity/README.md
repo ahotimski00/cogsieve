@@ -46,9 +46,31 @@ The throughput here (128 blocks/sec) is lower than the solar demo's 2,000 parcel
 
 ## A note on raster choice
 
-IO LULC v2 is the best free 10m global LULC available, but its categorical "Trees" class undercounts urban tree canopy. A pixel is labeled either Trees or Built Area; a city block with 15% canopy is labeled Built Area, not Trees. That's why the screen flags almost all of LA.
+IO LULC v2 is the best free 10m global LULC available, but its categorical "Trees" class undercounts urban tree canopy. A pixel is labeled either Trees or Built Area; a city block with 15% canopy is labeled Built Area, not Trees. That's why the IO LULC screen flags almost all of LA County.
 
-The proper next step is a CONUS-only NLCD TCC (Tree Canopy Cover) build, which gives fractional canopy (0-100%) per 30m pixel and would let the screen tune meaningful thresholds like "blocks with under 10% mean canopy." NLCD TCC is published by USGS MRLC but not on Planetary Computer's STAC catalog; it needs a build-once step similar to [scripts/build_slope_cog.py](../../scripts/build_slope_cog.py). That's tracked as a TODO in [screens.py](screens.py).
+**The finer-grained alternative is NLCD TCC (Tree Canopy Cover)**, a 30m fractional canopy product (0-100% per pixel) from USDA Forest Service / MRLC. The demo's `--canopy-raster` flag accepts a pre-built canopy-bin COG, and [scripts/build_canopy_cog.py](../../scripts/build_canopy_cog.py) reclassifies an MRLC TCC TIFF into 5 canopy bins for any AOI.
+
+Since MRLC's portal has anti-bot protections and the dataset is not on Planetary Computer, the source TIFF requires a one-time manual download. Steps:
+
+```bash
+# 1. Manually download the bundle from MRLC
+#    https://www.mrlc.gov/data/nlcd-2021-usfs-tree-canopy-cover-conus
+#    The ZIP is ~2 GB; unzip and locate nlcd_tcc_conus_2021_v2021-4.tif
+
+# 2. Build the AOI-clipped canopy COG (one-time per AOI)
+python scripts/build_canopy_cog.py \
+    --src /path/to/nlcd_tcc_conus_2021_v2021-4.tif \
+    --bbox -118.95 32.80 -117.65 34.83 \
+    --out data/la_county_canopy_classes.tif
+
+# 3. Run the tree-equity demo with the finer canopy raster
+python -m demos.tree_equity.run \
+    --blocks data/la_county_block_groups.parquet \
+    --canopy-raster data/la_county_canopy_classes.tif \
+    --out output/la_tree_priority_tcc.parquet
+```
+
+With NLCD TCC, the canopy threshold becomes meaningful: setting `--canopy-threshold 0.10` filters to "blocks where less than 10% of pixels are in the moderate-or-higher canopy bins," which actually separates Hollywood Hills from Compton.
 
 ## Data sources
 

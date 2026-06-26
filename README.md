@@ -69,7 +69,7 @@ See [src/cogsieve/screen.py](src/cogsieve/screen.py), [src/cogsieve/coverage.py]
 
 ## Demos
 
-Three demos, all wired end to end on real public data, all using the same primitive with different class codes and thresholds:
+Three demos, all wired end to end on public data, all using the same primitive with different class codes and thresholds:
 
 | Demo | AOI | Question | Screens | Scale & time |
 |---|---|---|---|---|

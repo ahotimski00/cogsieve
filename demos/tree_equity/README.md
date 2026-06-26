@@ -17,20 +17,22 @@ Both screens hit the same raster, which is the cheap case for the library: the s
 # 1. Fetch LA County block groups from Census TIGERweb (single REST call)
 python scripts/fetch_la_block_groups.py
 
-# 2. Run the screen
+# 2. Run the screen (these thresholds reproduce the benchmark below; code defaults are 20% / 60%)
 python -m demos.tree_equity.run \
     --blocks data/la_county_block_groups.parquet \
+    --canopy-threshold 0.05 \
+    --urban-threshold 0.70 \
     --out output/la_tree_priority.parquet
 ```
 
 ## Benchmark
 
-LA County, 6,591 census block groups, two screens (IO LULC 2023):
+LA County, 6,591 census block groups, two screens (IO LULC 2023), run with `--canopy-threshold 0.05 --urban-threshold 0.70`:
 
 ```
 loaded 6,591 candidate blocks
 resolved 2 screen(s) against IO LULC 2023
-running screen low_canopy on 6,591 polygons
+running screen low_canopy_lulc on 6,591 polygons
   kept 6,489 / dropped 102 (98.5% pass rate)
 running screen urban_context on 6,489 polygons
   kept 6,213 / dropped 276 (95.7% pass rate)

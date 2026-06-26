@@ -16,14 +16,14 @@ Each stage is one `CoverageScreen` instance in [screens.py](screens.py). The pip
 
 ```bash
 # 1. Fetch San Diego parcels (use --limit for fast iteration, omit for the full ~1M county)
-python scripts/fetch_san_diego_parcels.py --limit 25000
+python scripts/fetch_san_diego_parcels.py --limit 25000   # writes data/sd_parcels_25k.parquet
 
-# 2. Build the slope COG for the SD AOI (one-time, ~60s, produces a 7 MB COG)
+# 2. Build the slope COG for the SD AOI (one-time, ~65s, produces a 7 MB COG)
 python scripts/build_slope_cog.py
 
 # 3. Run the screen
 python -m demos.solar_siting.run \
-    --parcels data/san_diego_parcels.parquet \
+    --parcels data/sd_parcels_25k.parquet \
     --slope-raster data/san_diego_slope_classes.tif \
     --out output/solar_sites.parquet
 ```

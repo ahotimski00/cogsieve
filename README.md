@@ -2,9 +2,10 @@
 
 Sieve polygons by fractional class coverage of categorical rasters, read directly from Cloud-Optimized GeoTIFFs over HTTP.
 
+[![ci](https://github.com/ahotimski00/cogsieve/actions/workflows/ci.yml/badge.svg)](https://github.com/ahotimski00/cogsieve/actions/workflows/ci.yml)
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/)
 
-**Live demo:** https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/ - three tabs (solar siting, tree equity, wildfire WUI), each with its own threshold sliders that re-filter the cached coverage fractions in milliseconds.
+**Live demo:** [cogsieve.streamlit.app](https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/) - one interactive tab per demo, with threshold sliders that re-filter cached coverage fractions in milliseconds. Details under [Interactive demo](#interactive-demo).
 
 ```python
 from cogsieve import CoverageScreen, run_screens
@@ -42,13 +43,7 @@ The standard GIS workflow for this question is:
 4. Sum geodesic area of each fragment, grouped by class and polygon.
 5. Divide and threshold.
 
-That's slow, introduces rasterization artifacts at polygon edges, and requires the full raster in memory. cogsieve calls `exactextract` instead, which:
-
-- computes exact fractional pixel coverage per polygon analytically,
-- reads only the windowed pixels intersecting each polygon's bounding box,
-- works directly against remote COGs via HTTP range requests.
-
-A state-wide NLCD screen that took hours in the traditional pipeline runs in minutes here, without downloading the scene.
+That's slow, introduces rasterization artifacts at polygon edges, and requires the full raster in memory. cogsieve replaces all of it with a single `exactextract` call that computes exact fractional coverage from windowed COG reads, so a state-wide screen runs without downloading the scene. [Performance notes](#performance-notes) explains why each of those choices matters; [Benchmark](#benchmark) measures it against `rasterstats`.
 
 ## Design
 
@@ -60,26 +55,29 @@ class CoverageScreen:
     name: str
     raster: str | Path
     pass_classes: dict[int, str]
-    track_classes: dict[int, str] = {}
+    track_classes: dict[int, str] = field(default_factory=dict)
     min_coverage: float = 0.5
     invert: bool = False
+    nodata_as_zero: bool = True
 ```
 
 - `pass_classes` contribute to the threshold; `track_classes` are reported but not counted.
 - `invert=True` flips the threshold direction (keep polygons BELOW coverage), enabling "find low-canopy blocks" without a separate code path.
-- The pipeline caches each stage's output to GeoParquet, content-addressed by polygon hash + screen params, so re-runs are free.
+- The pipeline caches each stage's output to GeoParquet, content-addressed by polygon hash + screen params, so re-runs replay from cache.
 
 See [src/cogsieve/screen.py](src/cogsieve/screen.py), [src/cogsieve/coverage.py](src/cogsieve/coverage.py), [src/cogsieve/pipeline.py](src/cogsieve/pipeline.py).
 
 ## Demos
 
-Three demos, all on public data, all using the same primitive with different class codes and thresholds:
+Three demos, all wired end to end on real public data, all using the same primitive with different class codes and thresholds:
 
-| Demo | Question | Screens |
-|---|---|---|
-| [Solar siting](demos/solar_siting/) | Where can we site utility-scale solar without paving prime farmland? | NLCD buildable + low slope + NOT prime farmland (inverted SSURGO) |
-| [Tree equity](demos/tree_equity/) | Which urban blocks are below the canopy threshold and need planting? | Low canopy (inverted) + urban land-cover context |
-| [Wildfire WUI](demos/wildfire_wui/) | Which WUI parcels combine high fuels with a recent burn footprint? | LANDFIRE high-hazard fuels + MTBS recent burn |
+| Demo | AOI | Question | Screens | Scale & time |
+|---|---|---|---|---|
+| [Solar siting](demos/solar_siting/) | San Diego County | Where can we site utility-scale solar without paving prime farmland? | LCMAP buildable + 3DEP-derived low slope (inverted-SSURGO farmland screen is planned) | 25,000 parcels in 12 s (2 screens) |
+| [Tree equity](demos/tree_equity/) | LA County | Which urban blocks are below the canopy threshold and need planting? | IO LULC v2 low canopy (inverted) + urban land-cover context | 6,591 block groups in 52 s (2 screens) |
+| [Wildfire WUI](demos/wildfire_wui/) | San Diego County (2007 Witch Fire) | Which WUI parcels sit on a recent burn footprint? | MTBS burn severity (LANDFIRE fuels optional, manual download) | 25,000 parcels in 12 s (MTBS only) |
+
+Tree equity can optionally upgrade to NLCD TCC v2 canopy; wildfire WUI can optionally overlay LANDFIRE FBFM40 fuels.
 
 Each demo is one `screens.py` listing the `CoverageScreen` instances and a tiny `run.py` typer CLI. Adding a new domain is one config file.
 
@@ -96,13 +94,15 @@ Tests are hermetic: a synthetic 4-quadrant raster fixture in `tests/conftest.py`
 
 ## Benchmark
 
-Real numbers from the [solar siting demo](demos/solar_siting/) against San Diego County, on a 2024 MacBook with a residential broadband connection:
+Real numbers from the [solar siting demo](demos/solar_siting/) against San Diego County:
 
 | Stage | Input | Time |
 |---|---|---|
 | Fetch parcels (SanGIS REST API, 8 parallel workers) | 25,000 polygons | 8.3 s |
 | Build slope-class COG from 3DEP (one-time, per AOI) | 4 x 1-degree DEM tiles | 65 s |
 | Solar funnel: LCMAP buildable + slope-low (two sequential screens) | 25,000 -> 113 | 12.0 s |
+
+Conditions: Apple Silicon MacBook, exactextract 0.3.0, rasterstats 0.21.0, rasterio 1.5.0, run 2026-06. Single pass, no warm-up. TODO: re-run on a known machine and pin exact hardware (chip, RAM) and downlink bandwidth. Network-bound COG reads dominate the wall clock, so absolute times vary with bandwidth and Planetary Computer server state.
 
 Inside the funnel:
 
@@ -113,45 +113,46 @@ running screen slope_low on 768 polygons
   kept 113 / dropped 655 (14.7% pass rate)
 ```
 
-The LCMAP screen reads windowed pixels directly from the remote COG via HTTP range requests; no scene download. The slope screen reads from a local 7.3 MB COG derived once from 3DEP. The two-screen pipeline runs at ~2,000 parcels/sec because the second screen only sees parcels that passed the first.
+The LCMAP screen reads the remote COG; the slope screen reads a local 7.3 MB COG derived once from 3DEP. End to end this two-screen funnel is 2,082 parcels/sec (25,000 parcels / 12.0 s). The single-screen LCMAP number is higher (2,330 parcels/sec) because it skips the second stage; see the [head-to-head](#head-to-head-against-rasterstats).
 
 ## Performance notes
 
 cogsieve gets its speed from three design choices, each of which removes a category of work that traditional GIS workflows pay for:
 
 **1. Exact fractional coverage instead of rasterize-then-intersect.**
-The textbook zonal-stats workflow rasterizes the raster into vector polygons, then intersects those vectors with the input polygons, then sums geodesic area per fragment. That introduces edge artifacts (pixels half-inside a polygon get either fully counted or fully discarded depending on the snapping rule) and produces O(input_polygons x intersecting_pixels) intermediate vector features. `exactextract` computes each pixel's fractional intersection with each polygon analytically in C++, with no vectorization step. Daniel Baston's published benchmarks for the underlying algorithm show it processes well over an order of magnitude faster than the vector-intersect approach for equivalent fidelity, on the same hardware.
+The textbook zonal-stats workflow rasterizes the raster into vector polygons, then intersects those vectors with the input polygons, then sums geodesic area per fragment. That introduces edge artifacts (pixels half-inside a polygon get either fully counted or fully discarded depending on the snapping rule) and produces O(input_polygons x intersecting_pixels) intermediate vector features. `exactextract` computes each pixel's fractional intersection with each polygon analytically in C++, with no vectorization step. `exactextract` is the C++ implementation of this algorithm (Daniel Baston, https://github.com/isciences/exactextract). For a measured comparison on this project's data, see the [head-to-head against rasterstats](#head-to-head-against-rasterstats) below.
 
 **2. Cloud-Optimized GeoTIFF (COG) windowed reads instead of full-scene downloads.**
-A COG is laid out in internal tiles plus an overview pyramid, and HTTP servers that support range requests can serve individual tiles without serving the whole file. `rasterio` (via GDAL's `/vsicurl/` driver) issues range requests for just the tiles that intersect each polygon's bounding box. For the solar demo, that means screening 25,000 parcels against the CONUS-wide LCMAP raster (which is multiple GB) without downloading the scene: the wire reads were in the tens of megabytes, not gigabytes.
+A COG is laid out in internal tiles plus an overview pyramid, and HTTP servers that support range requests can serve individual tiles without serving the whole file. `rasterio` (via GDAL's `/vsicurl/` driver) issues range requests for just the tiles that intersect each polygon's bounding box. For the solar demo, that means screening 25,000 parcels against the CONUS-wide LCMAP raster (which is multiple GB) without downloading the scene: only the COG tiles intersecting each parcel's bounding box are fetched, not the full multi-GB raster.
 
 **3. Funnel pipeline with content-addressed caching.**
-The pipeline drops failing polygons between stages, so each successive screen only sees the survivors. In the solar demo, the slope screen runs on 768 polygons rather than 25,000 because LCMAP already filtered to 768 buildable parcels. The cache writes each stage's output to a GeoParquet keyed by `(polygon hash, screen name, classes, threshold)`, so re-running with the same inputs is near-instant. None of this requires user-side optimization; the funnel falls out of the `run_screens` API.
+The pipeline drops failing polygons between stages, so each successive screen only sees the survivors. In the solar demo, the slope screen runs on 768 polygons rather than 25,000 because LCMAP already filtered to 768 buildable parcels. The cache writes each stage's output to a GeoParquet keyed by `(polygon hash, screen name, classes, threshold)`, so re-running the same inputs replays from cache. The funnel is automatic: `run_screens` drops failing polygons between stages, with no configuration.
 
 The numbers above (12 s for 25k parcels through two screens) reflect all three together.
 
 ### Head-to-head against `rasterstats`
 
-`rasterstats` is the standard pure-Python zonal-stats library and represents the same workflow class as ArcPy's `ZonalStatisticsAsTable`. Running both libraries on the same 25,000 San Diego County parcels against the same Planetary Computer LCMAP COG, back-to-back, single pass each:
+`rasterstats` is the standard pure-Python zonal-stats library and represents the same workflow class as ArcPy's `ZonalStatisticsAsTable`. This is the single LCMAP screen (not the two-screen funnel), run on the same 25,000 San Diego County parcels against the same Planetary Computer LCMAP COG, back-to-back, single pass each:
 
 | Tool | Wall clock | Throughput | Passing parcels |
 |---|---|---|---|
 | **cogsieve** | **10.7 s** | 2,330 parcels/sec | 768 |
 | `rasterstats` | 320.0 s | 78 parcels/sec | 730 |
 
+Same machine and library versions as the [Benchmark](#benchmark) conditions above; both tools run back-to-back in one process so they see the same network and server state.
+
 **cogsieve is 30x faster** on this run. Both tools issued HTTP range requests against the same signed COG URL; the gap comes from `exactextract` being C++ rather than Python and from aggressive window batching. The 38-parcel pass-count delta reflects different fidelity, not a bug: `rasterstats` uses centroid-pixel containment (each pixel is either fully in or fully out of a polygon depending on where its centroid lands), while cogsieve computes exact fractional pixel coverage, so they answer slightly different questions on edge pixels.
 
-The benchmark script is at [scripts/bench_rasterstats.py](scripts/bench_rasterstats.py); reproduce with `python scripts/bench_rasterstats.py`.
+The benchmark script is at [scripts/bench_rasterstats.py](scripts/bench_rasterstats.py); reproduce with:
+
+```bash
+pip install -e ".[bench]"   # pulls in rasterstats, which is not a core dependency
+python scripts/bench_rasterstats.py --parcels data/sd_parcels_25k.parquet
+```
 
 ## Interactive demo
 
-Deployed at **https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/** - three tabs, one per demo:
-
-- **Solar siting** (San Diego County): two thresholds (LCMAP buildable, slope) re-filter 25,000 parcels
-- **Tree equity** (LA County): two thresholds (canopy, urban context) re-filter 6,591 census block groups
-- **Wildfire WUI** (San Diego County, 2007 Witch Fire): one threshold (moderate-or-high MTBS severity) re-filters 25,000 parcels
-
-The expensive raster reads were done once and cached; only the boolean `pass_frac >= threshold` recomputes per slider move.
+Deployed at [cogsieve.streamlit.app](https://cogsieve-vir5swvkd2a5fypnpyqlnn.streamlit.app/) - one tab per demo (see the table above for AOIs and scale). The expensive raster reads were done once and cached; each slider move only recomputes the boolean `pass_frac >= threshold`, so re-filtering is immediate.
 
 Run locally:
 
@@ -168,13 +169,5 @@ streamlit run streamlit_app.py
 4. Click **Deploy**. The build takes ~2 minutes (rasterio and exactextract pull GDAL wheels; no system packages needed).
 
 The deployed app reads the small GeoParquet files committed to [streamlit_data/](streamlit_data/), so it loads instantly with no live API calls. Re-running the screens from scratch happens locally; the cloud app only re-thresholds the cached fractions.
-
-## Status
-
-Three demos wired end to end on real public data:
-
-- **Solar siting** (San Diego County): USGS LCMAP buildable + 3DEP-derived slope. 25,000 parcels in 12 seconds. See [demos/solar_siting/](demos/solar_siting/).
-- **Tree equity** (LA County): IO LULC v2 low-canopy + urban-context, with optional NLCD TCC v2 upgrade. 6,591 block groups in 52 seconds. See [demos/tree_equity/](demos/tree_equity/).
-- **Wildfire WUI** (San Diego County): MTBS annual burn-severity (cloud-native), with optional LANDFIRE FBFM40 fuels overlay. 25,000 parcels in 12 seconds. See [demos/wildfire_wui/](demos/wildfire_wui/).
 
 PRs welcome.

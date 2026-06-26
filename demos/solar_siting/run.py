@@ -1,7 +1,7 @@
 """End-to-end solar siting demo.
 
 Usage:
-    python -m demos.solar_siting.run --parcels data/san_diego_parcels.parquet
+    python -m demos.solar_siting.run --parcels data/sd_parcels_25k.parquet
 """
 
 from __future__ import annotations

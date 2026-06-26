@@ -1,8 +1,9 @@
 """Fractional class coverage via exactextract.
 
 Reads windowed raster data only over each polygon's bounding box. For COGs served
-over HTTP this means range requests, not whole-file downloads - the same screen
-that took 6h in ArcPy runs in minutes against a remote COG.
+over HTTP this means range requests, not whole-file downloads, so a screen runs
+without pulling the full scene. See scripts/bench_rasterstats.py for a measured
+comparison against the standard zonal-stats path.
 """
 
 from __future__ import annotations

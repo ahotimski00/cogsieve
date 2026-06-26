@@ -45,9 +45,9 @@ streamlit = [
     "streamlit>=1.36",
     "pydeck>=0.9",
 ]
-
-[project.scripts]
-cogsieve = "cogsieve.cli:app"
+bench = [
+    "rasterstats>=0.19",
+]
 
 [tool.ruff]
 line-length = 110

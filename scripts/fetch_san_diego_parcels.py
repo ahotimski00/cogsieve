@@ -83,7 +83,7 @@ def _fetch_page(
 @app.command()
 def main(
     out: Path = typer.Option(
-        Path("data/san_diego_parcels.parquet"),
+        Path("data/sd_parcels_25k.parquet"),
         help="Output GeoParquet path.",
     ),
     bbox: tuple[float, float, float, float] = typer.Option(

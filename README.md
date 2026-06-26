@@ -141,7 +141,7 @@ The numbers above (12 s for 25k parcels through two screens) reflect all three t
 
 Same machine and library versions as the [Benchmark](#benchmark) conditions above; both tools run back-to-back in one process so they see the same network and server state.
 
-**cogsieve is 30x faster** on this run. Both tools issued HTTP range requests against the same signed COG URL; the gap comes from `exactextract` being C++ rather than Python and from aggressive window batching. The 38-parcel pass-count delta reflects different fidelity, not a bug: `rasterstats` uses centroid-pixel containment (each pixel is either fully in or fully out of a polygon depending on where its centroid lands), while cogsieve computes exact fractional pixel coverage, so they answer slightly different questions on edge pixels.
+**cogsieve is 30x faster** on this run. Both tools issued HTTP range requests against the same signed COG URL; the gap comes from `exactextract` being C++ rather than Python and from aggressive window batching. The 38-parcel pass-count delta reflects different fidelity: `rasterstats` uses centroid-pixel containment (each pixel is either fully in or fully out of a polygon depending on where its centroid lands), while cogsieve computes exact fractional pixel coverage, so they answer slightly different questions on edge pixels.
 
 The benchmark script is at [scripts/bench_rasterstats.py](scripts/bench_rasterstats.py); reproduce with:
 

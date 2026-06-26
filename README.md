@@ -90,7 +90,7 @@ ruff check .
 mypy src
 ```
 
-Tests are hermetic: a synthetic 4-quadrant raster fixture in `tests/conftest.py` gives ground-truth coverage values to assert against. No network, no large fixture files.
+Tests are hermetic: a synthetic 4-quadrant raster fixture in `tests/conftest.py` gives ground-truth coverage values to assert against.
 
 ## Benchmark
 
